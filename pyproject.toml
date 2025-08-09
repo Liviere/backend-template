@@ -37,6 +37,7 @@ package-mode = false
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
 pytest-asyncio = "^1.1.0"
+pytest-cov = "^6.2.1"
 debugpy = "^1.8.16"
 
 [build-system]
