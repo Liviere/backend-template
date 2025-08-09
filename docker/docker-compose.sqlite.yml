@@ -6,7 +6,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./app.db}
 
     volumes:
-      - ../app.db:/app/app.db
+      - ./app.db:/app/app.db
 
   # Celery Worker
   celery-worker:
@@ -15,7 +15,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./app.db}
 
     volumes:
-      - ../app.db:/app/app.db
+      - ./app.db:/app/app.db
 
 volumes:
   sqlite_data:

@@ -24,8 +24,8 @@ services:
       APP_NAME: ${APP_NAME:-backend-template}
       APP_DESCRIPTION: ${APP_DESCRIPTION:-FastAPI Application}
       APP_VERSION: ${APP_VERSION:-1.0.0}
-  CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
-  CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/1
+      CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/1
     networks:
       - app-network
     volumes:
@@ -48,8 +48,8 @@ services:
              --soft-time-limit=240"
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-  CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
-  CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/1
+      CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/1
 
     depends_on:
       redis:
@@ -72,7 +72,7 @@ services:
     networks:
       - app-network
     healthcheck:
-  test: ['CMD', 'redis-cli', '-p', '${REDIS_PORT:-6379}', 'ping']
+      test: ['CMD', 'redis-cli', '-p', '${REDIS_PORT:-6379}', 'ping']
       interval: 30s
       timeout: 10s
       retries: 3
