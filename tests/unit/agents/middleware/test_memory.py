@@ -172,12 +172,15 @@ class TestBeforeAgent:
 
             result = middleware.before_agent(state, MagicMock())
 
-        assert result["memory_context"] == "<memory>some context</memory>"
+        # memory_context must NOT be persisted into graph state (it would inline
+        # plaintext recalled-memory content into the checkpoint JSONB). It lives
+        # only in the in-process cache used for prompt injection.
+        assert "memory_context" not in result
+        assert middleware._cached_memory_context == "<memory>some context</memory>"
         assert result["memories_recalled"] == 3
         assert result["memory_recall_latency_ms"] == 12.5
         assert result["memory_types_recalled"] == ["preferences", "facts"]
         assert result["memory_categories_recalled"] == ["semantic"]
-        assert middleware._cached_memory_context is not None
 
     def test_handles_recall_error_gracefully(self, middleware):
         """Returns empty state on _recall_and_format exception."""
