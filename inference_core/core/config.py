@@ -261,6 +261,7 @@ class Settings(BaseSettings):
                 "replace",
             ),
             "EMBEDDING_BACKEND": ("embedding_backend", "fake"),
+            "PII_BACKEND": ("pii_backend", "regex"),
         }
 
         for env_name, (field_name, value) in testing_defaults.items():
@@ -553,6 +554,50 @@ class Settings(BaseSettings):
         description="Timeout in seconds for local Celery embedding task.",
         ge=5,
         le=300,
+    )
+
+    ###################################
+    #        PII DETECTION            #
+    ###################################
+    pii_backend: Literal["regex", "gliner-local", "remote", "fake"] = Field(
+        default="regex",
+        description="PII detection backend: 'regex' (generic patterns + "
+        "product-injected locale packs — no model), 'gliner-local' (in-process "
+        "GLiNER multilingual PII model, lazy per process; needs the optional "
+        "'pii' dependency group), 'remote' (external PII HTTP service), or "
+        "'fake' (no model; tests). Default 'regex' keeps today's behavior with "
+        "no new dependency or model load.",
+    )
+    pii_local_model: str = Field(
+        default="urchade/gliner_multi_pii-v1",
+        description="Multilingual GLiNER PII model id for the 'gliner-local' "
+        "backend and the 'pii.detect' batch task. Runs on CPU.",
+    )
+    pii_local_timeout: int = Field(
+        default=60,
+        description="Timeout in seconds for the off-process 'pii.detect' "
+        "Celery batch task.",
+        ge=5,
+        le=300,
+    )
+    pii_egress_timeout_ms: int = Field(
+        default=50,
+        description="Hard timeout (ms) for ML-backed redact_fast() on the "
+        "synchronous Sentry/Langfuse egress path; on timeout it falls back to "
+        "pure-regex redaction so an error event is never blocked or dropped.",
+        ge=1,
+        le=5000,
+    )
+    pii_remote_url: Optional[str] = Field(
+        default=None,
+        description="Base URL of the remote PII service (only read by the "
+        "'remote' backend).",
+    )
+    pii_remote_timeout: int = Field(
+        default=10,
+        description="HTTP timeout in seconds for the 'remote' PII backend.",
+        ge=1,
+        le=120,
     )
 
     ###################################

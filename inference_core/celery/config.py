@@ -45,6 +45,9 @@ class CeleryConfig:
         "inference_core.celery.tasks.batch_tasks.*": {"queue": "batch_tasks"},
         "inference_core.celery.tasks.email_tasks.*": {"queue": "mail"},
         "inference_core.celery.tasks.embedding_tasks.*": {"queue": "embeddings"},
+        # PII detection runs on its own opt-in prefork worker (--profile
+        # local-pii); by-name route so it is not swept into 'embeddings'.
+        "pii.detect": {"queue": "pii"},
     }
 
     task_default_queue = "default"
@@ -53,6 +56,7 @@ class CeleryConfig:
         Queue("batch_tasks", Exchange("batch_tasks"), routing_key="batch_tasks"),
         Queue("mail", Exchange("mail"), routing_key="mail"),
         Queue("embeddings", Exchange("embeddings"), routing_key="embeddings"),
+        Queue("pii", Exchange("pii"), routing_key="pii"),
     ]
 
     # Monitoring
