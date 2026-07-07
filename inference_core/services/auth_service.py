@@ -21,6 +21,7 @@ from inference_core.core.security import (
     verify_password,
 )
 from inference_core.database.sql.models.user import User
+from inference_core.observability.sentry_scrubbing import redact_pii_text
 from inference_core.schemas.auth import RegisterRequest
 
 # Import email functionality with fallback
@@ -238,9 +239,14 @@ class AuthService:
         # Send password reset email
         try:
             await self._send_password_reset_email(email, reset_token)
-            logger.info(f"Password reset email sent to {email}")
+            # Log the internal id, never the address (PII in log sinks).
+            logger.info("Password reset email sent (user_id=%s)", user.id)
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {email}: {e}")
+            logger.error(
+                "Failed to send password reset email (user_id=%s): %s",
+                user.id,
+                redact_pii_text(str(e)),
+            )
             # Still return True to not reveal if email exists
             # In production, you might want to retry or alert admins
 
@@ -255,10 +261,12 @@ class AuthService:
             reset_token: Password reset token
         """
         if not EMAIL_AVAILABLE:
+            # Never emit the address or the token — a logged reset token is a
+            # working account-takeover link for anyone who can read the logs.
             logger.warning(
-                "Email functionality not available, logging reset token instead"
+                "Email functionality not available; password reset token "
+                "generated but NOT delivered"
             )
-            print(f"Password reset token for {email}: {reset_token}")
             return
 
         # Build reset URL
@@ -309,16 +317,17 @@ class AuthService:
                         logger.info(f"Password reset email sent directly: {message_id}")
                     except Exception as e:
                         logger.error(
-                            f"Failed to send password reset email directly: {e}"
+                            "Failed to send password reset email directly: %s",
+                            redact_pii_text(str(e)),
                         )
 
                 thread = threading.Thread(target=send_direct, daemon=True)
                 thread.start()
             else:
                 logger.warning(
-                    "Email service not available, logging reset token instead"
+                    "Email service not available; password reset token "
+                    "generated but NOT delivered"
                 )
-                print(f"Password reset token for {email}: {reset_token}")
 
     def _render_template(self, template_name: str, variables: dict) -> str:
         """
@@ -464,10 +473,13 @@ class AuthService:
             verification_token: Email verification token
         """
         if not EMAIL_AVAILABLE:
+            # Never emit the address or the token itself — a logged token is a
+            # working verification link for anyone who can read the logs.
             logger.warning(
-                "Email functionality not available, logging verification token instead"
+                "Email functionality not available; verification token "
+                "generated but NOT delivered (user_id=%s)",
+                user.id,
             )
-            print(f"Email verification token for {user.email}: {verification_token}")
             return
 
         # Build verification URL
@@ -523,9 +535,13 @@ class AuthService:
         # Send verification email
         try:
             await self.send_verification_email(user, verification_token)
-            logger.info(f"Email verification email sent to {email}")
+            logger.info("Email verification email sent (user_id=%s)", user.id)
         except Exception as e:
-            logger.error(f"Failed to send verification email to {email}: {e}")
+            logger.error(
+                "Failed to send verification email (user_id=%s): %s",
+                user.id,
+                redact_pii_text(str(e)),
+            )
             # Still return True to not reveal if email exists
 
         return True

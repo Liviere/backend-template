@@ -438,9 +438,11 @@ class TestAuthService:
         assert result is True
         mock_security_manager.generate_password_reset_token.assert_called_once_with("test@example.com")
         
-        # Should print token when email not available
+        # Privacy: the token and address must NOT be emitted anywhere —
+        # a logged reset token is a working account-takeover link.
         captured = capsys.readouterr()
-        assert "reset_token_123" in captured.out
+        assert "reset_token_123" not in captured.out
+        assert "test@example.com" not in captured.out
 
     @patch("inference_core.services.auth_service.security_manager")
     @pytest.mark.asyncio
@@ -759,9 +761,11 @@ class TestAuthServiceIntegration:
         service = AuthService(mock_db)
         await service.send_verification_email(mock_user, "verification_token_123")
 
-        # Should print token when email not available
+        # Privacy: the token and address must NOT be emitted anywhere —
+        # a logged verification token is a working verification link.
         captured = capsys.readouterr()
-        assert "verification_token_123" in captured.out
+        assert "verification_token_123" not in captured.out
+        assert "test@example.com" not in captured.out
 
     @pytest.mark.asyncio
     async def test_request_verification_email_user_exists(self):
