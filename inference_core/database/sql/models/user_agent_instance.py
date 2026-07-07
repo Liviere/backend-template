@@ -93,16 +93,17 @@ class UserAgentInstance(BaseModel):
 
     # Instance identity
     instance_name: Mapped[str] = mapped_column(
-        String(100),
+        Text,
         nullable=False,
         index=True,
-        doc="Unique instance name per user (slug-like identifier)",
+        doc="Unique instance name per user (slug-like identifier; stays "
+        "plaintext — SQL lookup key; Text is preventive widening)",
     )
 
     display_name: Mapped[str] = mapped_column(
-        String(200),
+        Text,
         nullable=False,
-        doc="Human-readable display name",
+        doc="Human-readable display name (plaintext; Text is preventive)",
     )
 
     # Base agent reference
@@ -113,8 +114,10 @@ class UserAgentInstance(BaseModel):
         doc="Name of the base agent from agents_config.yaml (e.g., 'assistant_agent')",
     )
 
-    # Description
-    description: Mapped[Optional[str]] = mapped_column(
+    # Description (encrypted at rest behind ENCRYPT_INSTANCES_WRITES — the
+    # `description` property below is the read/write boundary)
+    _description: Mapped[Optional[str]] = mapped_column(
+        "description",
         Text,
         nullable=True,
         doc="User-provided description of this agent instance",
@@ -127,21 +130,26 @@ class UserAgentInstance(BaseModel):
         doc="Override for the primary LLM model (None = use base agent's model)",
     )
 
-    # System prompt overrides
-    system_prompt_override: Mapped[Optional[str]] = mapped_column(
+    # System prompt overrides (encrypted at rest — see properties below)
+    _system_prompt_override: Mapped[Optional[str]] = mapped_column(
+        "system_prompt_override",
         Text,
         nullable=True,
         doc="Full system prompt override (replaces base prompt entirely)",
     )
 
-    system_prompt_append: Mapped[Optional[str]] = mapped_column(
+    _system_prompt_append: Mapped[Optional[str]] = mapped_column(
+        "system_prompt_append",
         Text,
         nullable=True,
         doc="Text appended to the base system prompt (additive customization)",
     )
 
-    # Flexible JSON overrides for other agent config fields
-    config_overrides: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+    # Flexible JSON overrides for other agent config fields (encrypted at
+    # rest as a JSON string scalar — see property below). SQL-side access
+    # must use the underscore column and dual-read the value.
+    _config_overrides: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        "config_overrides",
         SmartJSON,
         nullable=True,
         doc=(
@@ -160,8 +168,9 @@ class UserAgentInstance(BaseModel):
         doc="Whether this is the user's default agent for new chats",
     )
 
-    # User-defined skills (list of {name, description, content} dicts)
-    skills: Mapped[Optional[list]] = mapped_column(
+    # User-defined skills (encrypted at rest — see property below)
+    _skills: Mapped[Optional[list]] = mapped_column(
+        "skills",
         SmartJSON,
         nullable=True,
         doc=(
@@ -215,6 +224,116 @@ class UserAgentInstance(BaseModel):
             "is_active",
         ),
     )
+
+    # ------------------------------------------------------------------
+    # Encrypted-field boundaries (privacy Faza 2). Every ORM attribute
+    # access — services, agent builders, API serializers, builder patchers —
+    # routes through these properties, so callers always see plaintext while
+    # the stored value may be an ``enc.v1.…`` token. Writes encrypt only
+    # when ENCRYPT_INSTANCES_WRITES is on; reads dual-read (legacy plaintext
+    # passes through). SQL-side column access must use the underscore
+    # attributes and dual-read explicitly.
+    # ------------------------------------------------------------------
+
+    _ENCRYPTED_KWARGS = (
+        "description",
+        "system_prompt_override",
+        "system_prompt_append",
+        "config_overrides",
+        "skills",
+    )
+
+    def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+        encrypted = {
+            key: kwargs.pop(key) for key in list(kwargs)
+            if key in self._ENCRYPTED_KWARGS
+        }
+        super().__init__(**kwargs)
+        for key, value in encrypted.items():
+            setattr(self, key, value)
+
+    @property
+    def description(self) -> Optional[str]:
+        from inference_core.services.content_cipher import dec_field
+
+        return dec_field(self._description)
+
+    @description.setter
+    def description(self, value: Optional[str]) -> None:
+        from inference_core.services.content_cipher import (
+            enc_field,
+            instances_enc_enabled,
+        )
+
+        self._description = enc_field(value, enabled=instances_enc_enabled())
+
+    @property
+    def system_prompt_override(self) -> Optional[str]:
+        from inference_core.services.content_cipher import dec_field
+
+        return dec_field(self._system_prompt_override)
+
+    @system_prompt_override.setter
+    def system_prompt_override(self, value: Optional[str]) -> None:
+        from inference_core.services.content_cipher import (
+            enc_field,
+            instances_enc_enabled,
+        )
+
+        self._system_prompt_override = enc_field(
+            value, enabled=instances_enc_enabled()
+        )
+
+    @property
+    def system_prompt_append(self) -> Optional[str]:
+        from inference_core.services.content_cipher import dec_field
+
+        return dec_field(self._system_prompt_append)
+
+    @system_prompt_append.setter
+    def system_prompt_append(self, value: Optional[str]) -> None:
+        from inference_core.services.content_cipher import (
+            enc_field,
+            instances_enc_enabled,
+        )
+
+        self._system_prompt_append = enc_field(
+            value, enabled=instances_enc_enabled()
+        )
+
+    @property
+    def config_overrides(self) -> Optional[Dict[str, Any]]:
+        from inference_core.services.content_cipher import dec_json
+
+        return dec_json(self._config_overrides)
+
+    @config_overrides.setter
+    def config_overrides(self, value: Optional[Dict[str, Any]]) -> None:
+        from inference_core.services.content_cipher import (
+            assert_decryptable_json,
+            enc_json,
+            instances_enc_enabled,
+        )
+
+        assert_decryptable_json(getattr(self, "_config_overrides", None))
+        self._config_overrides = enc_json(value, enabled=instances_enc_enabled())
+
+    @property
+    def skills(self) -> Optional[list]:
+        from inference_core.services.content_cipher import dec_json
+
+        return dec_json(self._skills)
+
+    @skills.setter
+    def skills(self, value: Optional[list]) -> None:
+        from inference_core.services.content_cipher import (
+            assert_decryptable_json,
+            enc_json,
+            instances_enc_enabled,
+        )
+
+        assert_decryptable_json(getattr(self, "_skills", None))
+        self._skills = enc_json(value, enabled=instances_enc_enabled())
 
     def __repr__(self) -> str:
         return (
