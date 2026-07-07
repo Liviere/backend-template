@@ -121,6 +121,11 @@ class BaseVectorStoreProvider(ABC):
         """
         Create a LangChain retriever interface.
 
+        WARNING — field-encryption bypass: implementations return a raw
+        retriever that does NOT decrypt field-encrypted payloads (``_text``).
+        Under ``ENCRYPT_QDRANT_WRITES`` it would surface ciphertext. No
+        production callers today — prefer ``similarity_search``/``search_similar``.
+
         Args:
             collection: Collection name (uses default if None)
             search_kwargs: Additional search parameters

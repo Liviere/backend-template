@@ -335,11 +335,15 @@ class MemoryStoreDocument:
 
     @property
     def content(self) -> str:
-        return self.value.get("content", "")
+        from inference_core.services.content_cipher import dec_field
+
+        return dec_field(self.value.get("content", ""), purpose="memory")
 
     @property
     def topic(self) -> Optional[str]:
-        return self.value.get("topic", None)
+        from inference_core.services.content_cipher import dec_field
+
+        return dec_field(self.value.get("topic", None), purpose="memory")
 
     @property
     def memory_type(self) -> Optional[str]:
@@ -463,10 +467,29 @@ class AgentMemoryStoreService:
             extra_metadata=extra_metadata,
         )
 
+        # Encrypt content/topic at rest (flag-gated). Semantic indexing stays
+        # correct because the embed_fn wrapped by
+        # EmbeddingService.get_embed_fn() decrypts tokens before embedding —
+        # `index=INDEXED_FIELDS` is REQUIRED on every put so only those
+        # fields are extracted (never the whole JSON with mixed ciphertext).
+        from inference_core.services.content_cipher import (
+            enc_field,
+            memory_enc_enabled,
+        )
+
+        value = dict(memory_data.__dict__)
+        value["content"] = enc_field(
+            value.get("content"), purpose="memory", enabled=memory_enc_enabled()
+        )
+        if value.get("topic"):
+            value["topic"] = enc_field(
+                value["topic"], purpose="memory", enabled=memory_enc_enabled()
+            )
+
         self.store.put(
             namespace_for_memory,
             memory_id,
-            memory_data.__dict__,
+            value,
             index=INDEXED_FIELDS,
         )
 
@@ -1184,13 +1207,15 @@ def _memory_item_to_dict(item: Any) -> Dict[str, Any]:
     created_at = _iso(getattr(item, "created_at", None)) or value.get("created_at")
     updated_at = _iso(getattr(item, "updated_at", None))
 
+    from inference_core.services.content_cipher import dec_field
+
     return {
         "namespace": namespace,
         "key": key,
-        "content": value.get("content", ""),
+        "content": dec_field(value.get("content", ""), purpose="memory"),
         "memory_type": value.get("memory_type"),
         "memory_category": category,
-        "topic": value.get("topic"),
+        "topic": dec_field(value.get("topic"), purpose="memory"),
         "agent_name": agent_name,
         "session_id": value.get("session_id"),
         "created_at": created_at,

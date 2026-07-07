@@ -253,6 +253,14 @@ class VectorStoreService:
         """
         Get a LangChain retriever instance.
 
+        WARNING — field-encryption bypass: the underlying provider retriever
+        does NOT dual-read (decrypt) the ``_text`` payload the way
+        ``similarity_search`` does. With ``ENCRYPT_QDRANT_WRITES`` on, documents
+        it yields would contain ciphertext. This method has NO production
+        callers today; do not use it for retrieval over an encrypted collection
+        without adding decryption. Prefer ``VectorStoreService.search`` /
+        provider ``similarity_search``.
+
         Args:
             collection: Collection name (uses default if None)
             search_kwargs: Additional search parameters

@@ -157,12 +157,25 @@ class QdrantProvider(BaseVectorStoreProvider):
         if not ids:
             ids = [str(uuid.uuid4()) for _ in texts]
 
-        # Prepare points for upsert
+        from inference_core.services.content_cipher import (
+            enc_field,
+            qdrant_enc_enabled,
+        )
+
+        # Prepare points for upsert. Embeddings were computed from the
+        # PLAINTEXT above; only the stored payload copy is encrypted
+        # (flag-gated) — vectors and filters are untouched (filters never
+        # reference _text, see _build_search_filter).
         points = []
         for i, (text, embedding) in enumerate(zip(texts, embeddings)):
             metadata = metadatas[i] if metadatas else {}
             # Store the original text in metadata for retrieval
-            payload = {**metadata, "_text": text}
+            payload = {
+                **metadata,
+                "_text": enc_field(
+                    text, purpose="memory", enabled=qdrant_enc_enabled()
+                ),
+            }
 
             point = models.PointStruct(
                 id=ids[i],
@@ -210,11 +223,13 @@ class QdrantProvider(BaseVectorStoreProvider):
         )
         points = search_result.points if hasattr(search_result, "points") else []
 
+        from inference_core.services.content_cipher import dec_field
+
         # Convert results to VectorStoreDocument
         documents = []
         for point in points:
-            # Extract text from payload
-            content = point.payload.get("_text", "")
+            # Extract text from payload (dual-read: may be an enc.v1 token)
+            content = dec_field(point.payload.get("_text", ""), purpose="memory")
             # Create metadata without internal fields
             metadata = {k: v for k, v in point.payload.items() if not k.startswith("_")}
 
@@ -236,7 +251,27 @@ class QdrantProvider(BaseVectorStoreProvider):
         collection: Optional[str] = None,
         search_kwargs: Optional[Dict[str, Any]] = None,
     ) -> BaseRetriever:
-        """Create a LangChain retriever using langchain-qdrant"""
+        """Create a LangChain retriever using langchain-qdrant.
+
+        WARNING — field-encryption bypass: unlike ``similarity_search`` /
+        ``search_similar`` (which dual-read the ``_text`` payload via
+        ``dec_field``), this returns a raw ``QdrantVectorStore`` retriever that
+        reads payloads directly. When ``ENCRYPT_QDRANT_WRITES`` is on, the
+        stored ``_text`` is an ``enc.v1.*`` token, so documents surfaced through
+        this retriever would carry CIPHERTEXT (and it also assumes langchain's
+        default ``page_content`` payload key, not this provider's ``_text``).
+        This method currently has NO production callers; do NOT wire it into a
+        RAG/prompt path over an encrypted collection without adding decryption.
+        """
+        from inference_core.services.content_cipher import qdrant_enc_enabled
+
+        if qdrant_enc_enabled():
+            self.logger.warning(
+                "as_retriever() called with ENCRYPT_QDRANT_WRITES enabled: the "
+                "returned retriever does NOT decrypt _text payloads and would "
+                "surface ciphertext. Use similarity_search/search_similar."
+            )
+
         try:
             from langchain_qdrant import QdrantVectorStore
         except ImportError:
@@ -412,11 +447,15 @@ class QdrantProvider(BaseVectorStoreProvider):
                 if not points:
                     break
 
+                from inference_core.services.content_cipher import dec_field
+
                 # Process points and add to results if past offset
                 for point in points:
                     if current_offset >= offset:
-                        # Extract text from payload
-                        content = point.payload.get("_text", "")
+                        # Extract text from payload (dual-read)
+                        content = dec_field(
+                            point.payload.get("_text", ""), purpose="memory"
+                        )
                         # Create metadata without internal fields
                         metadata = {
                             k: v
