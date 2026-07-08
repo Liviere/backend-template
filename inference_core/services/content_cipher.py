@@ -5,8 +5,11 @@ minimal, wire-compatible subset of the app keyring
 (``app/services/encryption.py``): versioned tokens
 ``enc.v1.<purpose>.<key_id>.<fernet>`` encrypted with the FIRST key of the
 purpose's env keyring and decryptable with ANY key in the ring (rotation).
-Tokens written here decrypt in the app layer and vice versa — guarded by
-cross-compatibility tests in ``tests/unit/test_content_cipher_compat.py``.
+Tokens written here decrypt in the app layer and vice versa because the wire
+format is identical; in-repo round-trip / rotation / fallback behaviour is
+covered by ``tests/unit/services/test_content_cipher.py`` (cross-layer decrypt
+against the real app keyring lives in the downstream app's own test suite —
+core cannot import ``app.*``).
 
 Purposes and env vars (mirror of the app registry):
 
