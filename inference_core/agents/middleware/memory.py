@@ -70,7 +70,12 @@ class MemoryState(AgentState):
     """Extended agent state for memory middleware (CoALA-aware).
 
     Attributes:
-        memory_context: Formatted CoALA-structured memory context string
+        memory_context: Formatted CoALA-structured memory context string.
+            Declared for backward compatibility but deliberately NEVER written
+            into state — a bare ``str`` channel inlines plaintext into the
+            checkpoint JSONB (bypassing the encrypting serde) and is never read
+            back. Recalled context is held only in the in-process cache
+            ``_cached_memory_context`` for prompt injection.
         memories_recalled: Number of memories retrieved during recall
         memory_recall_latency_ms: Time taken for memory recall in milliseconds
         memory_types_recalled: List of memory types that were retrieved
@@ -319,8 +324,14 @@ class MemoryMiddleware(AgentMiddleware[MemoryState]):
                 metrics.get("latency_ms", 0),
             )
 
+            # NOTE: memory_context is deliberately NOT returned into graph
+            # state. As a bare `str` channel it would be inlined verbatim into
+            # the `checkpoints.checkpoint` JSONB column (primitive channels
+            # bypass the encrypting serde), persisting recalled-memory content
+            # in plaintext every turn. It is never read back from state — prompt
+            # injection uses `self._cached_memory_context` — so persisting it is
+            # both a privacy leak and dead weight. Only the metrics are tracked.
             return {
-                "memory_context": memory_context,
                 "memories_recalled": metrics.get("count", 0),
                 "memory_recall_latency_ms": metrics.get("latency_ms", 0),
                 "memory_types_recalled": metrics.get("types", []),
@@ -331,7 +342,6 @@ class MemoryMiddleware(AgentMiddleware[MemoryState]):
             logger.error("Failed to recall memories: %s", e, exc_info=True)
             return {
                 "memories_recalled": 0,
-                "memory_context": "",
             }
 
     # -------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import logging
 import uuid
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Dict, Literal, Optional
@@ -1032,12 +1032,26 @@ class AgentService:
         await self.aclose()
 
     def _get_checkpointer(self):
-        """Initialize and return a checkpointer for the agent."""
+        """Initialize and return a checkpointer for the agent.
+
+        Savers are constructed manually (not via ``from_conn_string``, which
+        does not accept a serde) so the checkpoint-encryption serializer can
+        be injected. ``build_checkpoint_serializer`` returns a serializer
+        that always dual-reads (legacy plaintext blobs + encrypted ones) and
+        encrypts new writes only behind ENCRYPT_CHECKPOINTS_WRITES; when no
+        key is configured it returns None and the saver's default serde is
+        used.
+        """
+        from inference_core.services.checkpoint_cipher import (
+            build_checkpoint_serializer,
+        )
+
+        serde = build_checkpoint_serializer()
         url = self._sync_connection_string()
         if "sqlite" in url:
-            return SqliteSaver.from_conn_string(url)
+            return _sqlite_saver_with_serde(url, serde)
         elif "postgresql" in url:
-            return PostgresSaver.from_conn_string(url)
+            return _postgres_saver_with_serde(url, serde)
         elif "mysql" in url:
             logging.warning(
                 "MySQL checkpointer not implemented, using in-memory saver."
@@ -3290,3 +3304,36 @@ class DeepAgentService(AgentService):
             if name:
                 names.add(name)
         return names
+
+
+# ---------------------------------------------------------------------------
+# Checkpointer construction with an injectable serde (privacy Faza 2).
+# ``from_conn_string`` does not accept a serializer, so these replicate its
+# exact connection setup and pass ``serde=`` through to the saver.
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _postgres_saver_with_serde(url: str, serde):
+    from psycopg import Connection
+    from psycopg.rows import dict_row
+
+    with Connection.connect(
+        url, autocommit=True, prepare_threshold=0, row_factory=dict_row
+    ) as conn:
+        yield PostgresSaver(conn, serde=serde)
+
+
+@contextmanager
+def _sqlite_saver_with_serde(url: str, serde):
+    import sqlite3
+    from contextlib import closing
+
+    with closing(
+        sqlite3.connect(
+            url,
+            # https://ricardoanderegg.com/posts/python-sqlite-thread-safety/
+            check_same_thread=False,
+        )
+    ) as conn:
+        yield SqliteSaver(conn, serde=serde)

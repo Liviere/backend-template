@@ -69,7 +69,12 @@ def get_store(db_url: str):
         pass
 
     def embed_fn(texts: list[str]) -> list[list[float]]:
-        return model.encode(texts, convert_to_tensor=False).tolist()
+        # Decrypt-before-embed: stored content/topic may be enc.v1 tokens.
+        from inference_core.services.content_cipher import dec_field
+
+        plain = [dec_field(t, purpose="memory") if isinstance(t, str) else t
+                 for t in texts]
+        return model.encode(plain, convert_to_tensor=False).tolist()
 
     index_config = {"embed": embed_fn, "dims": dims}
 

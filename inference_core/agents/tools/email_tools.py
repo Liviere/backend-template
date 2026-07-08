@@ -228,15 +228,16 @@ def normalize_imap_query(query: str) -> str:
         # Remove non-ASCII characters to prevent encoding errors
         safe_query = query.encode("ascii", errors="ignore").decode("ascii").strip()
         if not safe_query:
-            # If nothing left after removing non-ASCII, search ALL
+            # If nothing left after removing non-ASCII, search ALL.
+            # Log only metadata — the query text is user content (PII).
             logger.warning(
-                "Query '%s' contains only non-ASCII characters, defaulting to ALL",
-                query[:50],
+                "Query (len=%d) contains only non-ASCII characters, defaulting to ALL",
+                len(query),
             )
             return "ALL"
         # Escape quotes in the search term
         safe_query = safe_query.replace('"', '\\"')
-        logger.info("Normalized free-form query '%s' to SUBJECT search", query[:50])
+        logger.info("Normalized free-form query (len=%d) to SUBJECT search", len(query))
         return f'SUBJECT "{safe_query}"'
 
     # Valid IMAP query - still sanitize non-ASCII in string arguments
@@ -313,10 +314,11 @@ Returns list of matching emails with details (UID, sender, subject, date).
             # Normalize query to prevent IMAP errors from malformed agent input
             normalized_query = normalize_imap_query(query)
             if normalized_query != query:
+                # Metadata only — the query text is user content (PII).
                 logger.info(
-                    "SearchEmailsTool: normalized query '%s' -> '%s'",
-                    query[:100],
-                    normalized_query[:100],
+                    "SearchEmailsTool: normalized query (len=%d -> len=%d)",
+                    len(query),
+                    len(normalized_query),
                 )
 
             messages = self.imap_service.fetch_emails(

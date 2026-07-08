@@ -54,6 +54,10 @@ def lifespan(settings: Settings, external_on_startup=None, external_on_shutdown=
             if settings.sentry_dsn:
                 import sentry_sdk
 
+                from inference_core.observability.sentry_scrubbing import (
+                    privacy_sentry_options,
+                )
+
                 sentry_sdk.init(
                     dsn=settings.sentry_dsn,
                     # Set traces_sample_rate to capture performance traces
@@ -65,13 +69,13 @@ def lifespan(settings: Settings, external_on_startup=None, external_on_shutdown=
                     environment=settings.environment,
                     # Set release to track deployments
                     release=settings.app_version,
-                    # Send default PII (personally identifiable information)
-                    # Be careful with this in production - consider data privacy requirements
-                    send_default_pii=True,
                     # Enable auto session tracking
                     auto_session_tracking=True,
                     # Attach stack traces to all messages
                     attach_stacktrace=True,
+                    # Privacy hardening: send_default_pii=False, no local
+                    # variables, before_send/before_breadcrumb PII scrubbers.
+                    **privacy_sentry_options(),
                 )
                 logging.info(
                     f"Sentry initialized for environment: {settings.environment}"

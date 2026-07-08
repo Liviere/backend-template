@@ -364,8 +364,26 @@ class EmbeddingService:
 
         This is the function signature LangGraph stores expect in their
         ``index={"embed": ..., "dims": ...}`` parameter.
+
+        Decrypt-before-embed (privacy Faza 2): the store extracts indexed
+        fields from the STORED value, which may be an ``enc.v1.…`` token
+        when memory encryption is on — embedding ciphertext would destroy
+        semantic search. The wrapper dual-reads every text (tokens →
+        plaintext, plaintext → passthrough, never raises), which keeps BOTH
+        the put()-side document indexing and the search()-side query
+        embedding correct: queries are plaintext and pass through untouched.
         """
-        return self._backend.embed_texts
+        from inference_core.services.content_cipher import dec_field
+
+        raw_embed = self._backend.embed_texts
+
+        def _decrypting_embed(texts: list[str]) -> list[list[float]]:
+            return raw_embed(
+                [dec_field(t, purpose="memory") if isinstance(t, str) else t
+                 for t in texts]
+            )
+
+        return _decrypting_embed
 
     def get_dimension(self) -> int:
         """Return the embedding vector dimensionality."""

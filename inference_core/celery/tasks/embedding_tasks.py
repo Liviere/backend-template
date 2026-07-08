@@ -23,6 +23,19 @@ _model_cache: dict[str, Any] = {}
 # Per-process cross-encoder cache (reranker models, loaded once per child).
 _cross_encoder_cache: dict[str, Any] = {}
 
+# Per-process GLiNER PII model cache (loaded once per prefork child).
+_gliner_cache: dict[str, Any] = {}
+
+
+def _get_gliner(model_name: str):
+    """Lazy-load and cache a GLiNER model for the current worker process."""
+    if model_name not in _gliner_cache:
+        from gliner import GLiNER
+
+        logger.info("Loading GLiNER PII model: %s", model_name)
+        _gliner_cache[model_name] = GLiNER.from_pretrained(model_name)
+    return _gliner_cache[model_name]
+
 
 def _get_sentence_transformer(model_name: str):
     """Lazy-load and cache a SentenceTransformer model for the current worker process."""
@@ -76,3 +89,49 @@ def rerank_documents(
     model = _get_cross_encoder(model_name)
     scores = model.predict([(query, document) for document in documents])
     return [float(score) for score in scores]
+
+
+@celery_app.task(name="pii.detect")
+def detect_pii(
+    texts: list[str],
+    model_name: str = "urchade/gliner_multi_pii-v1",
+    labels: list[str] | None = None,
+) -> list[list[dict]]:
+    """Batch multilingual PII detection with GLiNER (CPU-bound, prefork worker).
+
+    Returns, per input text, a list of ``{start, end, label, text, score}``
+    dicts. The model is loaded once per worker process and cached in
+    ``_gliner_cache``. Runs ONLY on the dedicated ``pii`` queue worker
+    (``--profile local-pii``); ``gliner`` is never imported elsewhere.
+    """
+    if not texts:
+        return []
+    model = _get_gliner(model_name)
+    entity_labels = labels or [
+        "person",
+        "email address",
+        "phone number",
+        "address",
+        "iban",
+        "credit card number",
+        "national id",
+        "passport number",
+        "date of birth",
+        "organization",
+    ]
+    results: list[list[dict]] = []
+    for text in texts:
+        entities = model.predict_entities(text, entity_labels)
+        results.append(
+            [
+                {
+                    "start": int(e["start"]),
+                    "end": int(e["end"]),
+                    "label": e.get("label", "PII"),
+                    "text": e.get("text", text[int(e["start"]) : int(e["end"])]),
+                    "score": float(e.get("score", 1.0)),
+                }
+                for e in entities
+            ]
+        )
+    return results

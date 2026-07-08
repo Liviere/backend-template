@@ -84,6 +84,16 @@ jsonschema-rs = "^0.44.0"
 grpcio-tools = "1.80.0"
 sse-starlette = "^3.3.0"
 
+# Optional CPU ML PII backend (GLiNER). NOT installed in the default image —
+# enable with `poetry install --with pii` on a host/worker that can afford it
+# (the `local-pii` prefork worker). torch is already a base dependency; only
+# gliner is added here. Run `poetry lock` before installing this group.
+[tool.poetry.group.pii]
+optional = true
+
+[tool.poetry.group.pii.dependencies]
+gliner = ">=0.2.13,<1.0.0"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
