@@ -121,45 +121,68 @@ class MemoryNamespaceBuilder:
       Shared:     (user_id, "semantic")
       Per-agent:  (user_id, "procedural", agent_name)
 
-    Rules:
-      - Semantic memory is ALWAYS shared across agents (user-global facts).
-      - Episodic memory is per-agent by default (each agent has its own history).
-      - Procedural memory is per-agent by default (agent-specific skills/rules).
-      - When agent_name is None, per-agent categories fall back to shared.
+    Scope-driven isolation (``scope`` param):
+      - ``"hybrid"`` (default) – legacy CoALA layout: semantic is ALWAYS shared
+                          user-wide; episodic/procedural are per-agent when
+                          ``agent_name`` is set. Used by the Agent Server path.
+      - ``"shared"``    – every category resolves to the user-global tuple
+                          ``(user_id, category)``; ``agent_name`` is ignored so
+                          the assistant reads/writes the app-wide user memory.
+      - ``"dedicated"`` – every category (including semantic) is namespaced by
+                          ``agent_name`` → ``(user_id, category, agent_name)``,
+                          giving the assistant a fully isolated memory silo.
+
+    When ``agent_name`` is None, per-agent tuples fall back to the shared
+    ``(user_id, category)`` form regardless of scope.
     """
+
+    _VALID_SCOPES = ("hybrid", "shared", "dedicated")
 
     def __init__(
         self,
         base_collection: str = "agent_memory",
         agent_name: Optional[str] = None,
+        scope: str = "hybrid",
     ) -> None:
         self.base_collection = base_collection
         self.agent_name = agent_name
+        self.scope = scope if scope in self._VALID_SCOPES else "hybrid"
 
     def namespace_for(
         self,
         user_id: str,
         category: MemoryCategory,
     ) -> Tuple[str, ...]:
-        """Build namespace tuple for a given user and CoALA category."""
+        """Build namespace tuple for a given user and CoALA category.
+
+        ``shared`` keeps every category user-global; ``dedicated`` isolates every
+        category by ``agent_name`` (including semantic); ``hybrid`` (legacy)
+        keeps semantic shared and isolates episodic/procedural per-agent.
+        """
         user_id = str(user_id)
 
+        if category not in (
+            MemoryCategory.SEMANTIC,
+            MemoryCategory.EPISODIC,
+            MemoryCategory.PROCEDURAL,
+        ):
+            # Fallback (should not happen with Enum)
+            return (user_id, MEMORIES_STORE_NAME)
+
+        if self.scope == "shared":
+            return (user_id, category.value)
+
+        if self.scope == "dedicated":
+            if self.agent_name:
+                return (user_id, category.value, self.agent_name)
+            return (user_id, category.value)
+
+        # hybrid (legacy default): semantic shared, episodic/procedural per-agent.
         if category == MemoryCategory.SEMANTIC:
-            # Always shared – user-global knowledge
-            return (user_id, MemoryCategory.SEMANTIC.value)
-
-        if category == MemoryCategory.EPISODIC:
-            if self.agent_name:
-                return (user_id, MemoryCategory.EPISODIC.value, self.agent_name)
-            return (user_id, MemoryCategory.EPISODIC.value)
-
-        if category == MemoryCategory.PROCEDURAL:
-            if self.agent_name:
-                return (user_id, MemoryCategory.PROCEDURAL.value, self.agent_name)
-            return (user_id, MemoryCategory.PROCEDURAL.value)
-
-        # Fallback (should not happen with Enum)
-        return (user_id, MEMORIES_STORE_NAME)
+            return (user_id, category.value)
+        if self.agent_name:
+            return (user_id, category.value, self.agent_name)
+        return (user_id, category.value)
 
     def namespace_for_type(
         self,
@@ -407,14 +430,17 @@ class AgentMemoryStoreService:
         base_namespace: Sequence[str] = (MEMORIES_STORE_NAME,),
         max_results: int = 5,
         agent_name: Optional[str] = None,
+        scope: str = "hybrid",
     ) -> None:
         self.store = store
         self.base_namespace = tuple(base_namespace)
         self.max_results = max_results
         self.agent_name = agent_name
+        self.scope = scope
         self.ns_builder = MemoryNamespaceBuilder(
             base_collection=base_namespace[0] if base_namespace else "agent_memory",
             agent_name=agent_name,
+            scope=scope,
         )
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 

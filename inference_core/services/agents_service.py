@@ -243,6 +243,7 @@ class AgentService:
         memory_tools: Optional[list[str]] = None,
         memory_session_context_enabled: Optional[bool] = None,
         memory_tool_instructions_enabled: Optional[bool] = None,
+        memory_scope: str = "shared",
         response_format_override: Optional[Any] = None,
     ):
         """Initialize the AgentService.
@@ -286,6 +287,10 @@ class AgentService:
             memory_tool_instructions_enabled: Override for memory tool instructions
                 in the system prompt.  When None, inherits from
                 AgentConfig.memory_tool_instructions_enabled or default behaviour.
+            memory_scope: Memory isolation scope for this run. ``"shared"`` (default)
+                routes every CoALA category to the user-global namespace; ``"dedicated"``
+                namespaces every category (including semantic) by this agent's
+                display_name, giving the assistant a fully isolated memory silo.
             response_format_override: Optional per-call structured-output schema.
                 Forwarded as-is to LangChain ``create_agent(response_format=...)``
                 when set, taking precedence over ``AgentConfig.response_format``.
@@ -332,6 +337,9 @@ class AgentService:
 
         # Memory setup
         self.use_memory = use_memory
+        self._memory_scope = (
+            memory_scope if memory_scope in ("shared", "dedicated") else "shared"
+        )
         self._enable_memory = False
         if use_memory:
             self.memory_store = self._initialize_memory_store()
@@ -1273,11 +1281,18 @@ class AgentService:
         if not self._memory_store_service:
             try:
                 base_namespace = (settings.agent_memory_collection,)
+                # ``dedicated`` scope isolates every category by this agent's
+                # identity; ``shared`` scope drops the agent_name so all
+                # categories resolve to the user-global namespace.
+                scope_agent_name = (
+                    self.display_name if self._memory_scope == "dedicated" else None
+                )
                 self._memory_store_service = AgentMemoryStoreService(
                     store=self.memory_store,
                     base_namespace=base_namespace,
                     max_results=settings.agent_memory_max_results,
-                    agent_name=self.display_name,
+                    agent_name=scope_agent_name,
+                    scope=self._memory_scope,
                 )
             except Exception as exc:
                 logging.error(
@@ -2583,6 +2598,7 @@ class DeepAgentService(AgentService):
         system_prompt_append: Optional[str] = None,
         instance_context: Optional[InstanceContext] = None,
         user_skills: Optional[list[dict[str, str]]] = None,
+        memory_scope: str = "shared",
         _visited_agents: Optional[set[str]] = None,
     ):
         """Initialize the DeepAgentService.
@@ -2633,6 +2649,7 @@ class DeepAgentService(AgentService):
             system_prompt_override=system_prompt_override,
             system_prompt_append=system_prompt_append,
             user_skills=user_skills,
+            memory_scope=memory_scope,
         )
         self._explicit_subagents = subagents or []
 

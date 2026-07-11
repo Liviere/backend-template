@@ -457,6 +457,19 @@ class UserAgentInstanceService:
 
         normalized = canonicalize_fallback_overrides(config_overrides)
 
+        # Validate per-assistant memory gates (app-layer flags stored in the
+        # config_overrides bag). Reject malformed values at the API boundary.
+        if "memory_access_enabled" in normalized:
+            if not isinstance(normalized["memory_access_enabled"], bool):
+                raise ValueError(
+                    "config_overrides.memory_access_enabled must be a boolean"
+                )
+        if "memory_scope" in normalized:
+            if normalized["memory_scope"] not in ("shared", "dedicated"):
+                raise ValueError(
+                    "config_overrides.memory_scope must be 'shared' or 'dedicated'"
+                )
+
         # Validate response_format: must be a non-empty JSON Schema dict.
         # WHY: keep DB overrides aligned with AgentConfig.validate_response_format
         # so invalid schemas are rejected at the API boundary, not at agent build.
